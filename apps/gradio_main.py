@@ -80,6 +80,7 @@ from apps.ui_constants import (
     DEFAULT_BATCH_SCRIPT,
     DEFAULT_BATCH_SCRIPT_SOLO,
     DEFAULT_BATCH_SCRIPT_MULTI,
+    SCRIPT_SYNTAX_GUIDE_MD,
 )
 
 # --- CONSTANTS & CONFIG ---
@@ -2010,6 +2011,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             lines=8,
                             placeholder="Nhập hoặc dán văn bản cần đọc vào đây…",
                         )
+                        with gr.Accordion("📖 Hướng dẫn cú pháp biểu cảm & ngắt nghỉ", open=False):
+                            gr.Markdown(SCRIPT_SYNTAX_GUIDE_MD)
                         
                         voice_select = gr.Dropdown(
                             choices=PRESET_VOICES_CACHE,
@@ -2028,6 +2031,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             lines=10,
                             elem_classes="script-box",
                         )
+                        with gr.Accordion("📖 Hướng dẫn cú pháp kịch bản & phân vai", open=False):
+                            gr.Markdown(SCRIPT_SYNTAX_GUIDE_MD)
                         
                         with gr.Row():
                             btn_detect_speakers = gr.Button("🔍 Quét nhân vật", size="sm", variant="secondary")
@@ -2243,6 +2248,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             lines=10,
                             elem_classes="batch-box"
                         )
+                        with gr.Accordion("📖 Hướng dẫn toàn bộ cú pháp định dạng kịch bản & biểu cảm", open=False):
+                            gr.Markdown(SCRIPT_SYNTAX_GUIDE_MD)
 
                         with gr.Row():
                             batch_auto_merge = gr.Checkbox(

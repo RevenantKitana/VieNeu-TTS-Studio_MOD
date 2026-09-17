@@ -253,3 +253,34 @@ DEFAULT_BATCH_SCRIPT_MULTI = """[#Đoạn 1: Gặp gỡ ở quán cà phê]
 
 DEFAULT_BATCH_SCRIPT = DEFAULT_BATCH_SCRIPT_SOLO
 
+SCRIPT_SYNTAX_GUIDE_MD = """
+### 📖 Bảng tra cứu toàn bộ cú pháp định dạng kịch bản & biểu cảm
+
+| Cú pháp | Ví dụ mẫu | Ý nghĩa & Hướng dẫn sử dụng |
+| :--- | :--- | :--- |
+| **`[#Tên đoạn]`** | `[#Đoạn 1: Mở đầu]`<br>`[#Chap 2: Gặp gỡ]` | **Phân tách đoạn (Batch Studio):** Chia kịch bản thành từng file âm thanh riêng biệt (`proj_001.wav`, `proj_002.wav`...) giúp dễ chỉnh sửa, tái tạo từng đoạn hoặc ghép nối thành file tổng. |
+| **`![#Đoạn]`** hoặc **`[skip: #Đoạn]`** | `![#Đoạn 2: Bỏ qua]`<br>`[skip: #Đoạn 3]` | **Bỏ qua phân đoạn (Skip Render):** Đánh dấu đoạn này để hệ thống **bỏ qua không render**, không tạo file audio nhưng vẫn giữ nguyên vị trí trong kịch bản. |
+| **`(Tên nhân vật)`** | `(Người dẫn) Ngày xửa ngày xưa...`<br>`(Phương) [cười] Chào anh!` | **Phân vai nhân vật:** Đặt ở đầu câu thoại để gán giọng đọc riêng cho từng nhân vật khi bật chế độ *🎭 Phân vai*. |
+| **`[cười]`** | `[cười] Tuyệt vời quá bạn ơi!` | **Thẻ tiếng cười:** Tạo tiếng cười hoặc ngữ điệu tươi vui, hào hứng *(Hỗ trợ trên model v3 Turbo)*. |
+| **`[thở dài]`** | `[thở dài] Mưa to quá không biết bao giờ mới tạnh.` | **Thẻ thở dài:** Tạo tiếng thở dài hoặc ngữ điệu trầm lắng, nhẹ nhàng *(Hỗ trợ trên model v3 Turbo)*. |
+| **`[hắng giọng]`** | `[hắng giọng] Xin mọi người chú ý lắng nghe.` | **Thẻ hắng giọng:** Tạo âm thanh hắng giọng chuẩn bị phát biểu *(Hỗ trợ trên model v3 Turbo)*. |
+| **`//` hoặc `#`** | `// Ghi chú hậu trường không đọc`<br>`# Nhạc nền du dương` | **Ghi chú / Bỏ qua:** Đặt ở đầu dòng để hệ thống tự động bỏ qua toàn bộ dòng đó, không chuyển thành tiếng nói. |
+| **Dấu câu ngắt nghỉ** | `,` *(nghỉ ngắn ~0.2s)*<br>`. ! ?` *(ngắt câu ~0.4s)*<br>`...` hoặc `-` *(ngắt lửng)* | **Điều khiển nhịp điệu:** Dùng dấu câu linh hoạt để điều chỉnh tốc độ ngắt nghỉ và ngữ điệu tự nhiên nhất. |
+
+---
+#### 💡 Ví dụ mẫu kịch bản hoàn chỉnh:
+```text
+[#Đoạn 1: Gặp gỡ ở quán cà phê]
+// Đoạn mở đầu kịch bản
+(Người dẫn) Trời bắt đầu đổ cơn mưa rào, hai người bạn vội vã bước vào một quán nhỏ.
+(Phương) [thở dài] Mưa to quá anh ơi, may mà chúng mình chạy vào kịp!
+(Dũng) [cười] Ừ, hôm nay thời tiết bất ngờ thật đấy. Em uống gì để anh gọi nhé?
+
+![#Đoạn 2: Phân cảnh bỏ qua]
+(Người dẫn) Đoạn này đã render từ trước, thêm dấu ! để bỏ qua không render lại.
+
+[#Đoạn 3: Thảo luận công việc]
+(Dũng) Dự án mới của em tiến độ thế nào rồi?
+(Phương) Mọi thứ đã sẵn sàng rồi anh, chuẩn bị xuất bản thôi!
+```
+"""
