@@ -109,14 +109,34 @@ def get_model_status_message() -> str:
         f"🖥️ Thiết bị chạy Codec: {codec_device}{preencoded_note}"
     )
 
+def init_default_model():
+    """Tự động nạp model mặc định khi khởi động ứng dụng trên XPU."""
+    global model_loaded, tts, current_backbone, current_codec
+    if model_loaded and tts is not None:
+        return
+    default_bb = list(BACKBONE_CONFIGS.keys())[0]
+    default_cd = "VieNeu-Codec" if "v3" in default_bb.lower() else list(CODEC_CONFIGS.keys())[0]
+    try:
+        print(f"🚀 Nạp model XPU mặc định: {default_bb}...")
+        for _ in load_model(default_bb, default_cd, "XPU"):
+            pass
+        print("✅ Model XPU mặc định đã sẵn sàng!")
+    except Exception as e:
+        print(f"ℹ️ Auto-load model on XPU: {e}")
+
 def restore_ui_state():
     """Update UI components based on persistence"""
-    global model_loaded
+    global model_loaded, tts
+    if not model_loaded:
+        init_default_model()
     msg = get_model_status_message()
+    voices = tts.list_preset_voices() if (tts and hasattr(tts, "list_preset_voices")) else []
+    default_v = getattr(tts, "_default_voice", None) if tts else (voices[0] if voices else None)
     return (
         msg, 
         gr.update(interactive=model_loaded), # btn_generate
-        gr.update(interactive=False)         # btn_stop
+        gr.update(interactive=False),        # btn_stop
+        gr.update(choices=voices, value=default_v) if voices else gr.update()
     )
 
 def load_model(backbone_choice: str, codec_choice: str, device_choice: str, 
@@ -624,16 +644,18 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS (XPU)", head=head_html) a
 </div>
         """)
         
-        # --- CONFIGURATION ---
-        with gr.Group():
+        # --- MODEL CONFIGURATION ACCORDION (OPTIONAL FOR ADVANCED USERS) ---
+        with gr.Accordion("⚙️ Cấu hình Nâng cao (Model & Thiết bị)", open=False):
             with gr.Row():
                 backbone_select = gr.Dropdown(
                     list(BACKBONE_CONFIGS.keys()) + ["Custom Model"], 
                     value="VieNeu-TTS (GPU)", 
-                    label="🦜 Backbone"
+                    label="🦜 Backbone",
+                    scale=3
                 )
-                codec_select = gr.Dropdown(list(CODEC_CONFIGS.keys()), value="NeuCodec (Distill)", label="🎵 Codec")
-                device_choice = gr.Radio(get_available_devices(), value="XPU", label="🖥️ Device", interactive=False)
+                codec_select = gr.Dropdown(list(CODEC_CONFIGS.keys()), value="NeuCodec (Distill)", label="🎵 Codec", scale=2)
+                device_choice = gr.Radio(get_available_devices(), value="XPU", label="🖥️ Device", interactive=False, scale=2)
+                btn_switch_model = gr.Button("🔄 Reload Model", variant="secondary", size="sm", min_width=130, scale=1)
             
             with gr.Row(visible=False) as custom_model_group:
                 custom_backbone_model_id = gr.Textbox(
@@ -657,25 +679,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS (XPU)", head=head_html) a
                     info="Model gốc để merge với LoRA",
                     scale=1
                 )
-            
-            gr.Markdown("""
-            💡 **Sử dụng Custom Model:** Chọn "Custom Model" để tải LoRA adapter hoặc bất kỳ model nào được finetune từ **VieNeu-TTS** hoặc **VieNeu-TTS-0.3B**.
-            """)
-            
-            gr.HTML("""
-            <div class="warning-banner">
-                <div class="warning-banner-title">
-                    ⚡ Chế độ tối ưu hóa cho Intel Arc GPU (XPU)
-                </div>
-                <div class="warning-banner-content">
-                    Ứng dụng đang chạy trên pytorch nightly tối ưu hóa riêng cho card đồ họa Intel (PyTorch XPU).<br>
-                    Lần tạo giọng nói <b>đầu tiên</b> (hoặc sau khi tải model mới) sẽ lâu hơn 1 chút. Các lần tiếp theo tốc độ sẽ được tối ưu.
-                </div>
-            </div>
-            """)
 
-            btn_load = gr.Button("🔄 Tải Model", variant="primary")
-            model_status = gr.Markdown("⏳ Chưa tải model.")
+            model_switch_status = gr.Markdown(value=get_model_status_message())
         
         with gr.Row(elem_classes="container"):
             # --- INPUT ---
@@ -747,7 +752,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS (XPU)", head=head_html) a
                 current_mode_state = gr.State("preset_mode")
                 
                 with gr.Row():
-                    btn_generate = gr.Button("🎵 Bắt đầu", variant="primary", scale=2, interactive=False)
+                    btn_generate = gr.Button("🎵 Bắt đầu", variant="primary", scale=2, interactive=True)
                     btn_stop = gr.Button("⏹️ Dừng", variant="stop", scale=1, interactive=False)
             
             # --- OUTPUT ---
@@ -802,11 +807,11 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS (XPU)", head=head_html) a
             outputs=[custom_backbone_base_model, custom_audio, custom_text]
         )
 
-        btn_load.click(
+        btn_switch_model.click(
             fn=load_model,
             inputs=[backbone_select, codec_select, device_choice, 
                     custom_backbone_model_id, custom_backbone_base_model, custom_backbone_hf_token],
-            outputs=[model_status, btn_generate, btn_load, btn_stop, voice_select, tab_preset, tab_custom, tabs, current_mode_state]
+            outputs=[model_switch_status, btn_generate, btn_switch_model, btn_stop, voice_select, tab_preset, tab_custom, tabs, current_mode_state]
         )
         
         generate_event = btn_generate.click(
@@ -826,7 +831,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS (XPU)", head=head_html) a
 
         demo.load(
             fn=restore_ui_state,
-            outputs=[model_status, btn_generate, btn_stop]
+            outputs=[model_switch_status, btn_generate, btn_stop, voice_select]
         )
 
 def main():
