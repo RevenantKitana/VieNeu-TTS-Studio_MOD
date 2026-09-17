@@ -1,0 +1,19 @@
+1
+00:00:01,000 --> 00:00:04,500
+Chào mừng bạn đến với VieNeu-TTS Studio.
+
+2
+00:00:05,200 --> 00:00:09,800
+Hôm nay, chúng ta cùng khám phá vẻ đẹp bình yên của mùa thu Hà Nội.
+
+3
+00:00:10,500 --> 00:00:15,300
+Những con đường rợp bóng cây xanh và hương hoa sữa nồng nàn góc phố.
+
+4
+00:00:16,000 --> 00:00:20,500
+Mỗi góc nhỏ nơi đây đều mang một nét cổ kính và trầm mặc rất riêng.
+
+5
+00:00:21,200 --> 00:00:25,000
+Cảm ơn các bạn đã lắng nghe đoạn thuyết minh này!

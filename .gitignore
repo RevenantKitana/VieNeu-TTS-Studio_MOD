@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments & Tools
+.venv
+.xpu_venv
+.uv_python/
+.uv_cache/
+.env
+
+# Binary Executables & Portable tools
+ffmpeg.exe
+tools/ffmpeg.exe
+*.exe
+
+# Audio Outputs & Project Exports
+outputs/
+*.zip
+*.tar.gz
+
+# Finetune Data & Checkpoints
+finetune/dataset/
+finetune/output/
+
+# Merged Models & Caches
+merged_models_cache/
+models_cache/
+
+# User custom voice directory
+.vieneu/
+
