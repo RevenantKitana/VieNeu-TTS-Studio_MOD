@@ -21,10 +21,7 @@ if exist "%~dp0.venv\Scripts\python.exe" (
     uv run python -m apps.preflight
 )
 
-:: 2. Tự động mở trình duyệt sau 2 giây
-start "" http://127.0.0.1:7860
-
-:: 3. Khởi động Web UI Server
+:: 2. Khởi động Web UI Server (Trình duyệt sẽ tự động mở khi Server sẵn sàng 100%)
 if exist "%~dp0.venv\Scripts\python.exe" (
     "%~dp0.venv\Scripts\python.exe" apps\gradio_main.py
 ) else (

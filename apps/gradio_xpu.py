@@ -841,10 +841,14 @@ def main():
     is_on_colab = os.getenv("COLAB_RELEASE_TAG") is not None
     share = env_bool("GRADIO_SHARE", default=is_on_colab)
 
-    if server_name == "0.0.0.0" and os.getenv("GRADIO_SHARE") is None:
-        share = False
+    inbrowser = env_bool("GRADIO_INBROWSER", default=not is_on_colab and server_name in ("127.0.0.1", "localhost"))
 
-    demo.queue().launch(server_name=server_name, server_port=server_port, share=share)
+    demo.queue().launch(
+        server_name=server_name,
+        server_port=server_port,
+        share=share,
+        inbrowser=inbrowser
+    )
 
 if __name__ == "__main__":
     main()

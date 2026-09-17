@@ -173,14 +173,31 @@ css = """
     margin-top: 10px;
 }
 .batch-toolbar {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+}
+.batch-toolbar > div,
+.batch-toolbar > button,
+.batch-toolbar .gradio-button,
+.batch-toolbar > div[class*="block"],
+.batch-toolbar > div[class*="svelte"] {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: unset !important;
+    max-width: fit-content !important;
 }
 .batch-toolbar button {
-    border-radius: 6px;
-    font-size: 0.85rem;
+    border-radius: 6px !important;
+    font-size: 0.85rem !important;
+    padding: 6px 12px !important;
+    white-space: nowrap !important;
+    width: auto !important;
+    min-width: unset !important;
+    flex: 0 0 auto !important;
 }
 .batch-box textarea {
     font-family: 'Inter', ui-sans-serif, sans-serif;
@@ -216,12 +233,23 @@ DEFAULT_TEXT_V3 = (
     "Xin chào mọi người! [hắng giọng] Như bạn đang nghe thấy đấy, tốc độ xử lý của mình cực kỳ nhanh và mượt mà, giúp phản hồi gần như ngay lập tức theo thời gian thực. Chính vì vậy, mình rất phù hợp để ứng dụng trực tiếp vào các hệ thống Chatbot thông minh, trợ lý ảo, hoặc làm tổng đài viên tự động cho các doanh nghiệp. Tiện lợi quá đúng không ạ? [cười] Hi vọng phiên bản nâng cấp v3 này sẽ mang lại trải nghiệm tuyệt vời cho dự án của bạn."
 )
 
-# Batch Studio multi-block demo text with emotion tags & multi-lines
-DEFAULT_BATCH_SCRIPT = """[#Đoạn 1] Về miền Tây không chỉ để ngắm nhìn sông nước hữu tình, mà còn để lắng nghe những câu hò điệu lý ngọt ngào.
-Nơi đây, con người luôn đôn hậu và mến khách. [cười] Bạn đã từng về miền Tây chưa?
+# Batch Studio multi-block demo texts
+DEFAULT_BATCH_SCRIPT_SOLO = """[#Đoạn 1: Mở đầu câu chuyện]
+Mùa thu Hà Nội luôn mang một vẻ đẹp rất riêng và lãng mạn. Những con phố rợp bóng cây xà cừ cổ thụ bỗng trở nên trầm mặc hơn khi từng đợt gió heo may se lạnh ùa về. [thở dài] Đi dạo trên đường Phan Đình Phùng vào một buổi sáng sớm, ta có thể cảm nhận được mùi hoa sữa thoang thoảng trong không khí.
 
-[#Đoạn 2] Hà Nội những ngày vào thu mang một vẻ đẹp trầm mặc và đầy thi vị. [thở dài]
-Gió heo may thổi nhẹ qua từng tán cây xà cừ cổ thụ, đưa hương hoa sữa thoang thoảng khắp các ngõ phố.
-
-[#Đoạn 3] Chúc các bạn có những giây phút trải nghiệm tuyệt vời cùng VieNeu-TTS Batch Studio!
+[#Đoạn 2: Trải nghiệm công nghệ]
+VieNeu-TTS Studio là giải pháp chuyển đổi văn bản thành giọng nói tiếng Việt chất lượng cao. Với công nghệ xử lý âm thanh 48kHz và hệ thống phân đoạn thông minh, bạn có thể dễ dàng tạo ra những cuốn sách nói hấp dẫn hoặc thuyết minh video chuyên nghiệp. [cười] Hãy cùng bắt đầu trải nghiệm ngay hôm nay!
 """
+
+DEFAULT_BATCH_SCRIPT_MULTI = """[#Đoạn 1: Gặp gỡ ở quán cà phê]
+(Người dẫn) Trời bắt đầu đổ cơn mưa rào, hai người bạn vội vã bước vào một quán cà phê nhỏ bên góc phố.
+(Phương) [thở dài] Mưa to quá anh ơi, may mà chúng mình chạy vào kịp quán!
+(Dũng) [cười] Ừ, hôm nay thời tiết bất ngờ thật đấy. À, em đã thử bản Mod VieNeu Studio của anh Khánh chưa?
+
+[#Đoạn 2: Thảo luận về bản Mod của Khánh]
+(Phương) Em vừa test xong anh ơi! Bản Mod của anh Khánh xịn xò thực sự, render đa vai từng đoạn 48kHz mượt mà lắm!
+(Dũng) [cười] Công nhận anh Khánh mod đỉnh thật, giao diện vừa đẹp vừa tiện lợi. Chuẩn bị xuất bản thôi!
+"""
+
+DEFAULT_BATCH_SCRIPT = DEFAULT_BATCH_SCRIPT_SOLO
+

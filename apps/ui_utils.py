@@ -66,7 +66,16 @@ def wrap_with_estimate(synthesize_fn):
         total_unit_duration = 0.0
         completed_units = 0
 
-        for audio_path, status in synthesize_fn(*args):
+        for item in synthesize_fn(*args):
+            if isinstance(item, (list, tuple)) and len(item) == 3:
+                audio_path, status_text, estimate_text = item
+                yield audio_path, status_text, estimate_text
+                continue
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                audio_path, status = item
+            else:
+                audio_path, status = item, ""
+
             status_text, estimate_text = _split_estimate_status(status)
 
             if not estimate_text:

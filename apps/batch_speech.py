@@ -409,6 +409,74 @@ def merge_project_audio(
                 pass
 
 
+def extract_speaker_and_text(line: str) -> tuple[Optional[str], Optional[str]]:
+    """Tách tên nhân vật và lời thoại CHỈ qua dấu ngoặc tròn ():
+    - (Tên) Lời thoại hoặc (Tên): Lời thoại hoặc (Tên:) Lời thoại
+    - **(Tên)** Lời thoại hoặc **(Tên):** Lời thoại hoặc (**Tên**) Lời thoại
+    Dấu ngoặc vuông [] được giữ nguyên hoàn toàn cho tag cảm xúc [cười], [thở dài] và tag đoạn [#Đoạn 1].
+    """
+    s = line.strip()
+    if not s:
+        return None, None
+
+    # Bỏ qua dòng tiêu đề phân đoạn
+    if s.startswith("[#") or s.startswith("[Block") or s.startswith("![#") or s.startswith("[skip:"):
+        return None, None
+
+    # Blacklist từ khóa không phải tên nhân vật
+    EXCLUDED_NAMES = {
+        "cười", "thở dài", "hắng giọng",
+        "lưu ý", "ghi chú", "chú ý", "ví dụ", "thời gian", "kết quả",
+        "tóm lại", "kết luận", "chương", "hồi", "tập", "cảnh", "skip", "block", "đoạn"
+    }
+
+    # Match (Tên) hoặc (Tên): hoặc **(Tên)** hoặc (**Tên**)
+    m = re.match(
+        r"^(?:\*\*\s*)?\(\s*(?:\*\*\s*)?([A-Za-zÀ-ỹ0-9_ \.\-]+?)(?::)?(?:\s*\*\*)?\s*\)(?:\s*\*\*)?\s*:?\s*(.+)$",
+        s
+    )
+    if m:
+        spk = m.group(1).strip()
+        dlg = m.group(2).strip()
+        if spk.lower() not in EXCLUDED_NAMES and not spk.isdigit() and len(spk) <= 35 and not spk.startswith("#"):
+            return spk, dlg
+
+    return None, None
+
+
+def parse_block_dialogue(block_text: str) -> list[dict[str, Optional[str]]]:
+    """Splits a block's content into dialogue turns:
+    Returns a list of turns: [{'speaker': 'Phương', 'text': '...'}, ...]
+    If no speaker format is found, returns [{'speaker': None, 'text': block_text}]
+    """
+    if not block_text:
+        return []
+
+    lines = block_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    turns: list[dict[str, Optional[str]]] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        
+        spk, dlg = extract_speaker_and_text(stripped)
+        if spk and dlg:
+            turns.append({"speaker": spk, "text": dlg})
+        else:
+            if turns:
+                # Continuation of current speaker's turn
+                turns[-1]["text"] = (turns[-1]["text"] or "") + " " + stripped
+            else:
+                # Untagged preamble line
+                turns.append({"speaker": None, "text": stripped})
+
+    if not turns:
+        return [{"speaker": None, "text": block_text.strip()}]
+    
+    return turns
+
+
 def batch_to_speech(
     tts,
     script_text: str,
@@ -426,10 +494,13 @@ def batch_to_speech(
     use_batch: bool = True,
     batch_size: int = 4,
     session_id: str = "default",
+    speaker_mapping: Optional[dict[str, str]] = None,
+    dialogue_silence_gap: float = 0.3,
 ) -> Iterator[tuple[Optional[str], str, str]]:
     """Gradio generator executing Batch Studio workflow.
     Yields (audio_path | None, status_text, estimate_text).
     - Checks resume / overwrite logic
+    - Supports Multi-Speaker dialogue turns inside each block
     - Fault-tolerance per block
     - Saves info.json and mapping.txt
     - Auto merges if requested
@@ -478,6 +549,18 @@ def batch_to_speech(
 
     last_wav_path: Optional[str] = None
 
+    def _resolve_turn_voice(spk_name: Optional[str]) -> str:
+        if not spk_name or not speaker_mapping:
+            return voice_id
+        v = speaker_mapping.get(spk_name.lower())
+        if not v:
+            # Fuzzy match
+            for k, mapped_v in speaker_mapping.items():
+                if k in spk_name.lower() or spk_name.lower() in k:
+                    return mapped_v
+            return voice_id
+        return v
+
     for i, item in enumerate(items, start=1):
         if stop_requested():
             yield None, "⏹️ Đã dừng tiến trình tạo Batch theo yêu cầu.", ""
@@ -508,42 +591,109 @@ def batch_to_speech(
             except Exception as e:
                 print(f"File {file_path} bị lỗi, sẽ render lại: {e}")
 
-        # 3. Render audio for this item with Fault-Tolerance
+        # 3. Render audio for this item with Multi-Speaker & Fault-Tolerance
         t_block_start = time.time()
-        yield None, f"⏳ Đang xử lý: Đoạn {i}/{total_items} ({item.tag})...", ""
+        turns = parse_block_dialogue(item.text)
+        is_multi_turn = len(turns) > 1 or (len(turns) == 1 and turns[0]["speaker"] is not None)
+
+        yield None, f"⏳ Đang xử lý: Đoạn {i}/{total_items} ({item.tag}) [{len(turns)} lượt thoại]...", ""
 
         try:
-            # We call synthesize_single_fn generator
-            gen = synthesize_single_fn(
-                item.text,
-                voice_id,
-                None,  # custom_audio
-                "",    # custom_text
-                "preset_mode",  # mode
-                "Standard (Một lần)",
-                use_batch,
-                batch_size,
-                temperature,
-                max_chars_chunk,
-                denoise,
-                session_id
-            )
-            
-            block_audio_path = None
-            for out_path, status_text in gen:
-                if stop_requested():
-                    break
-                if out_path:
-                    block_audio_path = out_path
-
-            if stop_requested():
-                yield None, "⏹️ Đã dừng tiến trình tạo Batch.", ""
-                break
-
-            if block_audio_path and os.path.exists(block_audio_path):
-                # Move or copy generated audio to project directory
-                shutil.copyfile(block_audio_path, str(file_path))
+            if not is_multi_turn:
+                # Single turn block: direct synthesis
+                gen = synthesize_single_fn(
+                    item.text,
+                    voice_id,
+                    None,  # custom_audio
+                    "",    # custom_text
+                    "preset_mode",  # mode
+                    "Standard (Một lần)",
+                    use_batch,
+                    batch_size,
+                    temperature,
+                    max_chars_chunk,
+                    denoise,
+                    session_id
+                )
                 
+                block_audio_path = None
+                for out_path, status_text in gen:
+                    if stop_requested():
+                        break
+                    if out_path:
+                        block_audio_path = out_path
+
+                if stop_requested():
+                    yield None, "⏹️ Đã dừng tiến trình tạo Batch.", ""
+                    break
+
+                if block_audio_path and os.path.exists(block_audio_path):
+                    shutil.copyfile(block_audio_path, str(file_path))
+                else:
+                    item.status = "FAILED"
+                    save_project_metadata(proj_dir, proj_name, backbone_name, voice_id, items, created_at)
+                    yield None, f"⚠️ Đoạn {i}/{total_items} ({item.tag}): Không sinh được âm thanh.", ""
+                    continue
+            else:
+                # Multi-speaker block: synthesize turns & join
+                sub_clips = []
+                cur_sr = 48000
+                
+                for t_idx, turn in enumerate(turns, start=1):
+                    if stop_requested():
+                        break
+                    t_spk = turn["speaker"]
+                    t_txt = turn["text"] or ""
+                    t_voice = _resolve_turn_voice(t_spk)
+                    
+                    spk_disp = f"[{t_spk}] " if t_spk else ""
+                    yield None, f"⏳ Đoạn {i}/{total_items} ({item.tag}) -> Thoại {t_idx}/{len(turns)}: {spk_disp}{t_txt[:30]}...", ""
+                    
+                    gen = synthesize_single_fn(
+                        t_txt,
+                        t_voice,
+                        None, "", "preset_mode", "Standard (Một lần)",
+                        use_batch, batch_size, temperature, max_chars_chunk,
+                        denoise, session_id
+                    )
+                    sub_out = None
+                    for out_p, _ in gen:
+                        if stop_requested():
+                            break
+                        if out_p:
+                            sub_out = out_p
+
+                    if sub_out and os.path.exists(sub_out):
+                        data, audio_sr = sf.read(sub_out, dtype="float32")
+                        if data.ndim > 1:
+                            data = data.mean(axis=-1)
+                        cur_sr = audio_sr
+                        sub_clips.append(data)
+
+                if stop_requested():
+                    yield None, "⏹️ Đã dừng tiến trình tạo Batch.", ""
+                    break
+
+                if sub_clips:
+                    # Concatenate sub-clips with dialogue silence
+                    silence_samples = int(max(0.0, dialogue_silence_gap) * cur_sr)
+                    silence_arr = np.zeros(silence_samples, dtype=np.float32)
+                    joined = []
+                    for c_idx, clip in enumerate(sub_clips):
+                        if c_idx > 0 and silence_samples > 0:
+                            joined.append(silence_arr)
+                        joined.append(clip)
+                    
+                    block_full_audio = np.concatenate(joined)
+                    sf.write(str(file_path), block_full_audio, cur_sr)
+                else:
+                    item.status = "FAILED"
+                    save_project_metadata(proj_dir, proj_name, backbone_name, voice_id, items, created_at)
+                    yield None, f"⚠️ Đoạn {i}/{total_items} ({item.tag}): Không sinh được âm thanh cho các lượt thoại.", ""
+                    continue
+
+            # Record success
+            if file_path.exists():
                 audio_info = sf.info(str(file_path))
                 item.duration_sec = audio_info.duration
                 item.status = "SUCCESS"
@@ -559,15 +709,8 @@ def batch_to_speech(
                 est_remain = avg_time * remaining_blocks
                 estimate_msg = f"Đoạn {i}/{total_items} | Ước tính còn lại: ~{est_remain:.0f}s"
 
-                # Update metadata immediately after each block
                 save_project_metadata(proj_dir, proj_name, backbone_name, voice_id, items, created_at)
-
                 yield str(file_path), f"🔊 Hoàn thành đoạn {i}/{total_items} ({item.tag}) [{audio_info.duration:.1f}s]", estimate_msg
-
-            else:
-                item.status = "FAILED"
-                save_project_metadata(proj_dir, proj_name, backbone_name, voice_id, items, created_at)
-                yield None, f"⚠️ Đoạn {i}/{total_items} ({item.tag}): Không sinh được âm thanh.", ""
 
         except Exception as e:
             item.status = "FAILED"

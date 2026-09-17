@@ -21,8 +21,7 @@ if exist "%~dp0.venv\Scripts\python.exe" (
     uv run python -m apps.preflight
 )
 
-start "" http://127.0.0.1:7860
-
+:: Khoi dong Web UI Server (Trinh duyet se tu dong mo sau khi Server san sang 100%)
 if exist "%~dp0.venv\Scripts\python.exe" (
     "%~dp0.venv\Scripts\python.exe" apps\gradio_main.py
 ) else (
