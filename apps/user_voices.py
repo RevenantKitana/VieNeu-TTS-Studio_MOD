@@ -138,6 +138,9 @@ def _write(tts) -> Path:
     return path
 
 
+DEFAULT_PREVIEW_TEXT = "[cười] Nếu như anh không thích em thì, anh cứ bảo là anh không thích em đi, [thở dài] sao cứ phải văn vở với nhau như thế nhở?"
+
+
 def save_user_voice(tts, name: str, ref_audio: str, *, denoise: bool = True, description: str = "") -> str:
     """Enroll ``ref_audio`` as a named preset and persist it. Returns the voice id.
     A name that belongs to a built-in voice is refused; re-saving one of the
@@ -162,13 +165,26 @@ def save_user_voice(tts, name: str, ref_audio: str, *, denoise: bool = True, des
     entry["podcast"] = True
     _write(tts)
 
-    # Save copy of reference audio as preview file in custom_voices folder
-    if ref_audio and os.path.isfile(ref_audio):
+    # Sinh file preview chuẩn hóa với câu thoại cảm xúc mặc định cho giọng mới
+    preview_file = voices_home() / f"preview_{name}.wav"
+    rendered = False
+    if hasattr(tts, "infer"):
         try:
-            preview_file = voices_home() / f"preview_{name}.wav"
+            wav = tts.infer(DEFAULT_PREVIEW_TEXT, voice=name, temperature=0.8)
+            if wav is not None and len(wav) > 0:
+                import soundfile as sf
+                sample_rate = getattr(tts, "sample_rate", 24000)
+                sf.write(str(preview_file), wav, sample_rate)
+                rendered = True
+        except Exception as e:
+            print(f"⚠️ Không thể sinh preview TTS cho giọng '{name}': {e}")
+
+    # Fallback copy reference audio if synthesis was not possible
+    if not rendered and ref_audio and os.path.isfile(ref_audio):
+        try:
             shutil.copyfile(ref_audio, str(preview_file))
         except Exception as e:
-            print(f"⚠️ Không thể lưu file preview cho giọng '{name}': {e}")
+            print(f"⚠️ Không thể lưu file preview fallback cho giọng '{name}': {e}")
 
     return name
 
