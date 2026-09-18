@@ -20,6 +20,38 @@ import queue
 import threading
 import yaml
 import gc
+import uuid
+import re
+from pathlib import Path
+from typing import Optional
+
+_project_root = Path(__file__).resolve().parent.parent
+OUTPUTS_DIR = _project_root / "outputs"
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+def save_output_audio(
+    audio_data: np.ndarray,
+    sr: int,
+    prefix: str = "single",
+    fmt: str = "wav",
+    target_dir: Optional[Path] = None,
+) -> str:
+    """Lưu tệp âm thanh trực tiếp vào thư mục outputs/ với timestamp và trả về đường dẫn tuyệt đối."""
+    out_dir = target_dir or OUTPUTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    rand_suffix = uuid.uuid4().hex[:4]
+    ext = fmt.lower().lstrip(".")
+    safe_prefix = re.sub(r"[^\w\-]", "_", str(prefix)).strip("_") or "audio"
+    filename = f"{safe_prefix}_{ts}_{rand_suffix}.{ext}"
+    target_path = out_dir / filename
+
+    if ext == "mp3" and "MP3" in sf.available_formats():
+        sf.write(str(target_path), audio_data, sr, format="MP3")
+    else:
+        sf.write(str(target_path), audio_data, sr)
+    return str(target_path.resolve())
 
 from vieneu.core_xpu import XPUVieNeuTTS
 from vieneu_utils.core_utils import split_text_into_chunks, join_audio_chunks, env_bool
@@ -437,9 +469,8 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
                 
                 final_wav = join_audio_chunks(all_wavs, sr=sr, silence_p=0.15)
             
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                    sf.write(tmp.name, final_wav, sr)
-                    output_path = tmp.name
+                pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+                output_path = save_output_audio(final_wav, sr, prefix=pfx)
                 
                 process_time = time.time() - start_time
                 speed_info = f", Tốc độ: {len(final_wav)/sr/process_time:.2f}x realtime" if process_time > 0 else ""
@@ -478,9 +509,8 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
             
             final_wav = join_audio_chunks(all_wavs, sr=sr, silence_p=0.15)
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                sf.write(tmp.name, final_wav, sr)
-                output_path = tmp.name
+            pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+            output_path = save_output_audio(final_wav, sr, prefix=pfx)
             
             process_time = time.time() - start_time
             speed_info = f", Tốc độ: {len(final_wav)/sr/process_time:.2f}x realtime" if process_time > 0 else ""
@@ -604,9 +634,9 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
         
         if full_audio_buffer:
             final_wav = np.concatenate(full_audio_buffer)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                sf.write(tmp.name, final_wav, sr)
-                yield tmp.name, f"✅ Hoàn tất Streaming! (Intel XPU)"
+            pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+            stream_out = save_output_audio(final_wav, sr, prefix=pfx)
+            yield stream_out, f"✅ Hoàn tất Streaming! (Intel XPU)"
             
             cleanup_gpu_memory()
 

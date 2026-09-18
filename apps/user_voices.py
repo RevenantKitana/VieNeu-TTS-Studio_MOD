@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 USER_MARK = "_user"          # key set on tts._preset_voices entries that came from here
 DEFAULT_DESC = "giọng đã lưu"
 
@@ -30,7 +33,13 @@ def _kind(tts) -> str:
 
 
 def voices_home() -> Path:
-    return Path(os.environ.get("VIENEU_HOME") or (Path.home() / ".vieneu"))
+    """Returns the custom voices folder in the project root (portable) or VIENEU_HOME if set."""
+    if "VIENEU_HOME" in os.environ:
+        p = Path(os.environ["VIENEU_HOME"])
+    else:
+        p = PROJECT_ROOT / "custom_voices"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def user_voices_path(tts) -> Path:
@@ -91,6 +100,16 @@ def load_user_voices(tts) -> list[str]:
     if not supports_saving(tts):
         return []
     path = user_voices_path(tts)
+    # Migrate legacy ~/.vieneu files if project-level file does not exist yet
+    if not path.is_file():
+        legacy_path = Path.home() / ".vieneu" / f"user_voices_v3_{_kind(tts)}.json"
+        if legacy_path.is_file():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(legacy_path, path)
+            except Exception:
+                path = legacy_path
+
     if not path.is_file():
         return []
     try:
@@ -114,7 +133,7 @@ def _write(tts) -> Path:
     data = {"meta": {"note": f"VieNeu v3 {_kind(tts)} voices saved from the Gradio app"}, "presets": presets}
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     return path
 
@@ -142,6 +161,15 @@ def save_user_voice(tts, name: str, ref_audio: str, *, denoise: bool = True, des
     entry[USER_MARK] = True
     entry["podcast"] = True
     _write(tts)
+
+    # Save copy of reference audio as preview file in custom_voices folder
+    if ref_audio and os.path.isfile(ref_audio):
+        try:
+            preview_file = voices_home() / f"preview_{name}.wav"
+            shutil.copyfile(ref_audio, str(preview_file))
+        except Exception as e:
+            print(f"⚠️ Không thể lưu file preview cho giọng '{name}': {e}")
+
     return name
 
 
@@ -153,3 +181,90 @@ def delete_user_voice(tts, name: str) -> None:
         raise ValueError("Chỉ xoá được giọng do bạn lưu.")
     tts.remove_voice(name)
     _write(tts)
+
+    # Clean up preview file if present
+    for candidate in [voices_home() / f"preview_{name}.wav", voices_home() / f"{name}.wav"]:
+        if candidate.exists():
+            try:
+                candidate.unlink()
+            except Exception:
+                pass
+
+
+def find_voice_preview(voice_name: Optional[str], tts=None) -> Optional[str]:
+    """Tìm file audio preview cho giọng nói.
+    Thứ tự ưu tiên:
+    1. custom_voices/ (folder dự án)
+    2. src/vieneu/assets/samples/ (các file mẫu tích hợp sẵn)
+    3. Thư mục model checkpoint (nếu có)
+    Tên file ưu tiên dạng: preview_<Tên giọng>.*, <Tên giọng>.*
+    """
+    if not voice_name or not str(voice_name).strip():
+        return None
+
+    raw_name = str(voice_name).strip()
+    # Tách nhãn phụ nếu có dạng "Trúc Ly (nữ miền Nam)" hoặc "Trúc Ly — nữ miền Nam"
+    clean_name = re.split(r"[\(—\-]", raw_name)[0].strip()
+
+    search_dirs: list[Path] = [
+        voices_home(),
+        PROJECT_ROOT / "src" / "vieneu" / "assets" / "samples",
+    ]
+
+    if tts is not None:
+        model_dir = getattr(tts, "_backbone_dir", None) or getattr(tts, "model_dir", None)
+        if model_dir and Path(model_dir).is_dir():
+            search_dirs.append(Path(model_dir))
+
+    valid_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+
+    words = clean_name.split()
+    last_word = words[-1].lower() if words else ""
+
+    candidates = [
+        f"preview_{raw_name}".lower(),
+        f"preview_{clean_name}".lower(),
+        raw_name.lower(),
+        clean_name.lower(),
+    ]
+
+    # Resolve aliases from preset voices if tts loaded
+    if tts is not None and hasattr(tts, "_preset_voices"):
+        v_entry = tts._preset_voices.get(raw_name) or tts._preset_voices.get(clean_name)
+        if isinstance(v_entry, dict):
+            for a in v_entry.get("aliases", []):
+                candidates.append(f"preview_{a}".lower())
+                candidates.append(a.lower())
+
+    for sdir in search_dirs:
+        if not sdir.exists():
+            continue
+
+        files = list(sdir.iterdir())
+        
+        # 1. Khớp chính xác tên candidate
+        for file in files:
+            if not file.is_file() or file.suffix.lower() not in valid_exts:
+                continue
+            if file.stem.lower() in candidates:
+                return str(file.resolve())
+
+        # 2. Khớp bắt đầu bằng preview_<tên> hoặc candidate
+        for file in files:
+            if not file.is_file() or file.suffix.lower() not in valid_exts:
+                continue
+            stem = file.stem.lower()
+            for c in candidates:
+                if stem.startswith(c) or stem.startswith(f"preview_{c}"):
+                    return str(file.resolve())
+
+        # 3. Khớp từ khóa tên đầy đủ hoặc từ khóa tên cuối (Ví dụ: "Trúc Ly" -> "Ly (nữ miền Bắc).wav")
+        for file in files:
+            if not file.is_file() or file.suffix.lower() not in valid_exts:
+                continue
+            stem = file.stem.lower()
+            stem_first_word = stem.split()[0].replace("preview_", "").strip("()")
+            if clean_name.lower() in stem or (last_word and stem_first_word == last_word):
+                return str(file.resolve())
+
+    return None

@@ -114,26 +114,43 @@ def concatenate(clips: list[np.ndarray], sr: int, gap_s: float = 0.5) -> np.ndar
     return np.concatenate(parts) if parts else np.zeros(sr, dtype=np.float32)
 
 
+from pathlib import Path
+import datetime
+import uuid
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+
+
 def write_audio(track: np.ndarray, sr: int, fmt: str) -> tuple[str, str]:
-    """Write to a temp file; MP3 when libsndfile can, else WAV. Returns (path, note)."""
+    """Write audio directly to outputs/ folder; MP3 when libsndfile can, else WAV. Returns (path, note)."""
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    rand_id = uuid.uuid4().hex[:4]
+
     peak = float(np.abs(track).max()) if track.size else 0.0
     if peak > 0.98:
         track = track * (0.98 / peak)
-    if fmt.lower() == "mp3" and "MP3" in sf.available_formats():
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tmp.close()
+
+    ext = fmt.lower().lstrip(".")
+    if ext == "mp3" and "MP3" in sf.available_formats():
+        out_file = OUTPUTS_DIR / f"srt_{ts}_{rand_id}.mp3"
         try:
-            sf.write(tmp.name, track, sr, format="MP3")
-            return tmp.name, ""
+            sf.write(str(out_file), track, sr, format="MP3")
+            return str(out_file.resolve()), ""
         except Exception as e:  # noqa: BLE001 — fall back to WAV below
             note = f" (MP3 không ghi được: {e}; đã xuất WAV)"
-            os.unlink(tmp.name)
+            if out_file.exists():
+                try:
+                    out_file.unlink()
+                except Exception:
+                    pass
     else:
-        note = " (MP3 không khả dụng trên máy này; đã xuất WAV)" if fmt.lower() == "mp3" else ""
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    tmp.close()
-    sf.write(tmp.name, track, sr)
-    return tmp.name, note
+        note = " (MP3 không khả dụng trên máy này; đã xuất WAV)" if ext == "mp3" else ""
+
+    out_file = OUTPUTS_DIR / f"srt_{ts}_{rand_id}.wav"
+    sf.write(str(out_file), track, sr)
+    return str(out_file.resolve()), note
 
 
 def srt_to_speech(

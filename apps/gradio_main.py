@@ -10,10 +10,12 @@ if sys.platform == "win32":
 
 import os
 from pathlib import Path
+from typing import Optional
+
+_project_root = Path(__file__).resolve().parent.parent
 
 # Đảm bảo mặc định HF_HOME trỏ về thư mục models_cache trong dự án (Portable 100%)
 if "HF_HOME" not in os.environ:
-    _project_root = Path(__file__).resolve().parent.parent
     _default_hf_home = _project_root / "models_cache"
     os.environ["HF_HOME"] = str(_default_hf_home)
 
@@ -60,6 +62,7 @@ from apps.audio_library import (
 )
 from apps.user_voices import (
     load_user_voices, save_user_voice, delete_user_voice, list_user_voices, supports_saving,
+    find_voice_preview,
 )
 from apps.ui_utils import (
     _format_duration,
@@ -84,6 +87,33 @@ from apps.ui_constants import (
 )
 
 # --- CONSTANTS & CONFIG ---
+OUTPUTS_DIR = _project_root / "outputs"
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+def save_output_audio(
+    audio_data: np.ndarray,
+    sr: int,
+    prefix: str = "single",
+    fmt: str = "wav",
+    target_dir: Optional[Path] = None,
+) -> str:
+    """Lưu tệp âm thanh trực tiếp vào thư mục outputs/ với timestamp và trả về đường dẫn tuyệt đối."""
+    out_dir = target_dir or OUTPUTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    rand_suffix = uuid.uuid4().hex[:4]
+    ext = fmt.lower().lstrip(".")
+    safe_prefix = re.sub(r"[^\w\-]", "_", str(prefix)).strip("_") or "audio"
+    filename = f"{safe_prefix}_{ts}_{rand_suffix}.{ext}"
+    target_path = out_dir / filename
+
+    if ext == "mp3" and "MP3" in sf.available_formats():
+        sf.write(str(target_path), audio_data, sr, format="MP3")
+    else:
+        sf.write(str(target_path), audio_data, sr)
+    return str(target_path.resolve())
+
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 try:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -205,8 +235,8 @@ CONV_VOICES_CACHE = []    # Filtered list for conversation (podcast=True)
 
 
 def _sort_voices(tts, voices):
-    """Dropdown order: editors' picks (``featured`` 1..N in the voices JSON, already
-    ⭐-labelled by the SDK) first in that order, then everything else A-Z."""
+    """Dropdown order: editors' picks first, then A-Z. Decorates with 🔊 if preview audio exists."""
+    from apps.user_voices import find_voice_preview
     presets = getattr(tts, "_preset_voices", {}) or {}
 
     def _key(v):
@@ -215,6 +245,14 @@ def _sort_voices(tts, voices):
         return (rank is None, rank or 0, str(label))
 
     voices.sort(key=_key)
+
+    for i in range(len(voices)):
+        item = voices[i]
+        label, v_id = (item[0], item[1]) if isinstance(item, tuple) else (item, item)
+        has_preview = bool(find_voice_preview(v_id, tts))
+        clean_label = str(label).replace("🔊 ", "").strip()
+        new_label = f"🔊 {clean_label}" if has_preview else clean_label
+        voices[i] = (new_label, v_id)
 MAX_SPEAKERS = 8          # Max concurrent speakers in conversation tab
 
 # Normalizer (module-level singleton)
@@ -1099,9 +1137,8 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
             if wav is None or len(wav) == 0:
                 yield None, "❌ Không sinh được audio nào."
                 return
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                sf.write(tmp.name, wav, sr_v3)
-                out_path_v3 = tmp.name
+            pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+            out_path_v3 = save_output_audio(wav, sr_v3, prefix=pfx)
             _dt = time.time() - _t0
             _spd = f", Tốc độ: {len(wav)/sr_v3/_dt:.2f}x realtime" if _dt > 0 else ""
             yield out_path_v3, f"✅ Hoàn tất! ({v3_label}, Thời gian: {_dt:.2f}s{_spd})"
@@ -1243,9 +1280,8 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
             silence_p = 0.15 if not is_v2_turbo else 0.0 # Turbo adds silence internally
             final_wav = join_audio_chunks(all_wavs, sr=sr, silence_p=silence_p)
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                sf.write(tmp.name, final_wav, sr)
-                output_path = tmp.name
+            pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+            output_path = save_output_audio(final_wav, sr, prefix=pfx)
             
             process_time = time.time() - start_time
             backend_info = f" (Backend: {'LMDeploy 🚀' if using_lmdeploy else 'Standard 📦'})"
@@ -1422,10 +1458,9 @@ def synthesize_speech(text: str, voice_choice: str, custom_audio, custom_text: s
         
         if full_audio_buffer:
             final_wav = np.concatenate(full_audio_buffer)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                sf.write(tmp.name, final_wav, sr)
-                
-                yield tmp.name, f"✅ Hoàn tất Streaming! ({backend_info})"
+            pfx = "cloned" if (mode_tab == "custom_mode" or custom_audio is not None) else (f"single_{voice_choice}" if voice_choice else "single")
+            stream_out = save_output_audio(final_wav, sr, prefix=pfx)
+            yield stream_out, f"✅ Hoàn tất Streaming! ({backend_info})"
             
             # Cleanup memory
             if using_lmdeploy and hasattr(tts, 'cleanup_memory'):
@@ -1513,9 +1548,8 @@ def _synthesize_conversation_v3(lines, mapping, temperature, max_chars_chunk, si
             return
         yield None, "🪄 Đang ghép nối âm thanh..."
         final_wav = np.concatenate(all_wavs)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            sf.write(tmp.name, final_wav, sr)
-            yield tmp.name, f"✅ Hoàn tất hội thoại! ({len(lines)} câu, {time.time()-t0:.1f}s, CPU tuần tự)"
+        conv_out = save_output_audio(final_wav, sr, prefix="conversation")
+        yield conv_out, f"✅ Hoàn tất hội thoại! ({len(lines)} câu, {time.time()-t0:.1f}s, CPU tuần tự)"
         cleanup_gpu_memory()
         return
 
@@ -1581,10 +1615,9 @@ def _synthesize_conversation_v3(lines, mapping, temperature, max_chars_chunk, si
 
     yield None, "🪄 Đang ghép nối âm thanh..."
     final_wav = np.concatenate(all_wavs)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        sf.write(tmp.name, final_wav, sr)
-        elapsed = time.time() - t0
-        yield tmp.name, f"✅ Hoàn tất hội thoại! ({len(lines)} câu, {len(reqs)} đoạn, {elapsed:.1f}s, batch 32)"
+    conv_out = save_output_audio(final_wav, sr, prefix="conversation")
+    elapsed = time.time() - t0
+    yield conv_out, f"✅ Hoàn tất hội thoại! ({len(lines)} câu, {len(reqs)} đoạn, {elapsed:.1f}s, batch 32)"
     cleanup_gpu_memory()
 
 
@@ -1760,10 +1793,9 @@ def synthesize_conversation(
         yield None, "🪄 Đang ghép nối âm thanh..."
         final_wav = np.concatenate(all_wavs)
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            sf.write(tmp.name, final_wav, sr)
-            elapsed = time.time() - start_time
-            yield tmp.name, f"✅ Hoàn tất hội thoại! ({total_lines} câu, xử lý trong {elapsed:.1f}s)"
+        conv_out = save_output_audio(final_wav, sr, prefix="conversation")
+        elapsed = time.time() - start_time
+        yield conv_out, f"✅ Hoàn tất hội thoại! ({total_lines} câu, xử lý trong {elapsed:.1f}s)"
             
     except Exception as e:
         import traceback
@@ -2014,12 +2046,24 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                         with gr.Accordion("📖 Hướng dẫn cú pháp biểu cảm & ngắt nghỉ", open=False):
                             gr.Markdown(SCRIPT_SYNTAX_GUIDE_MD)
                         
-                        voice_select = gr.Dropdown(
-                            choices=PRESET_VOICES_CACHE,
-                            value=default_v_init,
-                            label="Giọng đọc",
-                            allow_custom_value=True,
-                        )
+                        with gr.Row():
+                            voice_select = gr.Dropdown(
+                                choices=PRESET_VOICES_CACHE,
+                                value=default_v_init,
+                                label="Giọng đọc",
+                                allow_custom_value=True,
+                                scale=3,
+                            )
+                            _initial_preview = find_voice_preview(default_v_init, tts if model_loaded else None)
+                            voice_preview = gr.Audio(
+                                label="🔊 Nghe thử giọng mẫu (Preview)",
+                                type="filepath",
+                                interactive=False,
+                                autoplay=False,
+                                scale=2,
+                                visible=bool(_initial_preview),
+                                value=_initial_preview,
+                            )
                         generation_mode = gr.State("Standard (Một lần)")
                         btn_generate = gr.Button("🎵 Tạo âm thanh", variant="primary", scale=2, interactive=True)
 
@@ -2092,7 +2136,17 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                     with gr.Tab("📝 SRT", id="srt_tab") as srt_tab:
                         gr.Markdown("Tải lên file phụ đề **.srt tiếng Việt** để tự động tạo file âm thanh đồng bộ theo mốc thời gian.")
                         srt_file = gr.File(label="File phụ đề .srt", file_types=[".srt"], file_count="single", type="filepath")
-                        srt_voice = gr.Dropdown(choices=PRESET_VOICES_CACHE, value=default_v_init, label="Giọng đọc", allow_custom_value=True)
+                        with gr.Row():
+                            srt_voice = gr.Dropdown(choices=PRESET_VOICES_CACHE, value=default_v_init, label="Giọng đọc", allow_custom_value=True, scale=3)
+                            srt_voice_preview = gr.Audio(
+                                label="🔊 Nghe thử giọng mẫu",
+                                type="filepath",
+                                interactive=False,
+                                autoplay=False,
+                                scale=2,
+                                visible=bool(_initial_preview),
+                                value=_initial_preview,
+                            )
                         with gr.Row():
                             srt_keep_timing = gr.Checkbox(
                                 value=True, label="Giữ đúng mốc thời gian",
@@ -2165,6 +2219,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             with gr.Row(elem_classes="inline-row"):
                                 user_voice_dd = gr.Dropdown(choices=list_user_voices(tts) if model_loaded else [], value=None, show_label=False, container=False, scale=4)
                                 btn_delete_voice = gr.Button("🗑️ Xoá", variant="secondary", size="sm", scale=0, min_width=100)
+                            user_voice_preview = gr.Audio(label="🔊 Nghe thử giọng đã lưu", type="filepath", interactive=False, autoplay=False, visible=False)
 
                     # --- TAB 5: BATCH STUDIO ---
                     with gr.Tab("📦 Batch Studio", id="batch_tab") as batch_tab:
@@ -2196,6 +2251,15 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                                 label="Giọng đọc",
                                 allow_custom_value=True,
                                 scale=2
+                            )
+                            batch_voice_preview = gr.Audio(
+                                label="🔊 Nghe thử giọng mẫu",
+                                type="filepath",
+                                interactive=False,
+                                autoplay=False,
+                                scale=2,
+                                visible=bool(_initial_preview),
+                                value=_initial_preview,
                             )
                         with gr.Accordion("🎭 Danh sách nhân vật", open=True, visible=False) as batch_speaker_accordion:
                             with gr.Row():
@@ -2562,13 +2626,28 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             names = list_user_voices(tts) if model_loaded else []
             return gr.update(choices=names, value=names[0] if names else None)
 
+        def _on_voice_preview_change(v_choice):
+            if not v_choice:
+                return gr.update(value=None, visible=False)
+            p = find_voice_preview(v_choice, tts if model_loaded else None)
+            if p and os.path.isfile(p):
+                return gr.update(value=p, visible=True)
+            return gr.update(value=None, visible=False)
+
+        voice_select.change(_on_voice_preview_change, inputs=[voice_select], outputs=[voice_preview])
+        srt_voice.change(_on_voice_preview_change, inputs=[srt_voice], outputs=[srt_voice_preview])
+        batch_voice.change(_on_voice_preview_change, inputs=[batch_voice], outputs=[batch_voice_preview])
+        user_voice_dd.change(_on_voice_preview_change, inputs=[user_voice_dd], outputs=[user_voice_preview])
+
         def _after_model_load():
             b_choices, b_btn = _batch_voices()
-            return gr.update(interactive=bool(model_loaded)), _user_voice_choices(), b_choices, b_btn
+            init_v = getattr(tts, "_default_voice", None) or (PRESET_VOICES_CACHE[0][1] if PRESET_VOICES_CACHE and isinstance(PRESET_VOICES_CACHE[0], tuple) else None)
+            prev_update = _on_voice_preview_change(init_v)
+            return gr.update(interactive=bool(model_loaded)), _user_voice_choices(), b_choices, b_btn, prev_update, prev_update, prev_update
 
         btn_switch_model.click(lambda: gr.update(interactive=False), outputs=btn_generate_clone)
         btn_switch_model.click(lambda: gr.update(interactive=False), outputs=btn_generate_batch)
-        load_event.then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd, batch_voice, btn_generate_batch])
+        load_event.then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd, batch_voice, btn_generate_batch, voice_preview, srt_voice_preview, batch_voice_preview])
         
         # --- PDF Upload Event Handlers ---
         def on_pdf_upload(pdf_file):
@@ -3016,7 +3095,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
         demo.load(
             fn=restore_ui_state,
             outputs=[model_switch_status, btn_generate, btn_generate_conv, btn_stop, voice_select]
-        ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd, batch_voice, btn_generate_batch])
+        ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd, batch_voice, btn_generate_batch, voice_preview, srt_voice_preview, batch_voice_preview])
 
 def main():
     # Cho phép override từ biến môi trường (hữu ích cho Docker)

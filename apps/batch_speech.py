@@ -624,11 +624,24 @@ def batch_to_speech(
                         block_audio_path = out_path
 
                 if stop_requested():
+                    if block_audio_path and os.path.exists(block_audio_path):
+                        try:
+                            os.unlink(block_audio_path)
+                        except Exception:
+                            pass
                     yield None, "⏹️ Đã dừng tiến trình tạo Batch.", ""
                     break
 
                 if block_audio_path and os.path.exists(block_audio_path):
-                    shutil.copyfile(block_audio_path, str(file_path))
+                    if Path(block_audio_path).resolve() != file_path.resolve():
+                        try:
+                            shutil.move(block_audio_path, str(file_path))
+                        except Exception:
+                            shutil.copyfile(block_audio_path, str(file_path))
+                            try:
+                                os.unlink(block_audio_path)
+                            except Exception:
+                                pass
                 else:
                     item.status = "FAILED"
                     save_project_metadata(proj_dir, proj_name, backbone_name, voice_id, items, created_at)
@@ -669,6 +682,10 @@ def batch_to_speech(
                             data = data.mean(axis=-1)
                         cur_sr = audio_sr
                         sub_clips.append(data)
+                        try:
+                            os.unlink(sub_out)
+                        except Exception:
+                            pass
 
                 if stop_requested():
                     yield None, "⏹️ Đã dừng tiến trình tạo Batch.", ""
