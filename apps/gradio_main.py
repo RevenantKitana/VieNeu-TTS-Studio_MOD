@@ -2310,6 +2310,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             placeholder="[#Đoạn 1] Nội dung đoạn 1...\n\n[#Đoạn 2] Nội dung đoạn 2...",
                             value=DEFAULT_BATCH_SCRIPT_SOLO,
                             lines=10,
+                            elem_id="batch_script_input",
                             elem_classes="batch-box"
                         )
                         with gr.Accordion("📖 Hướng dẫn toàn bộ cú pháp định dạng kịch bản & biểu cảm", open=False):
@@ -2869,23 +2870,88 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
         btn_generate_srt.click(lambda: gr.update(interactive=True), outputs=btn_stop)
         srt_gen_event.then(fn=on_audio_generated, inputs=[audio_output], outputs=[download_btn])
 
-        # --- Batch Studio toolbar handlers ---
-        def _ins_block(text):
-            text = text or ""
-            matches = re.findall(r'\[(?:#|Block:\s*)?([^\]]+)\]', text, re.IGNORECASE)
-            next_idx = len(matches) + 1
-            return (text.rstrip() + f"\n\n[#Đoạn {next_idx}] ").strip() + "\n"
+        # --- Batch Studio toolbar handlers (Client-side cursor-aware insertion) ---
+        def _make_js_insert_tag(tag_str):
+            return f"""() => {{
+                const el = document.querySelector('#batch_script_input textarea') || document.querySelector('.batch-box textarea');
+                const val = el ? el.value : '';
+                const start = (el && typeof el.selectionStart === 'number') ? el.selectionStart : val.length;
+                const end = (el && typeof el.selectionEnd === 'number') ? el.selectionEnd : val.length;
+                const prefix = (start > 0 && !/\\s/.test(val[start - 1])) ? ' ' : '';
+                const suffix = (end < val.length && !/\\s/.test(val[end])) ? ' ' : ' ';
+                const inserted = prefix + '{tag_str}' + suffix;
+                const newVal = val.slice(0, start) + inserted + val.slice(end);
+                const newPos = start + inserted.length;
+                if (el) {{
+                    el.value = newVal;
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    setTimeout(() => {{
+                        el.focus();
+                        el.setSelectionRange(newPos, newPos);
+                    }}, 20);
+                }}
+                return newVal;
+            }}"""
 
-        def _ins_tag(text, tag_str):
-            text = text or ""
-            return text + f" {tag_str} "
+        js_insert_block = """() => {
+            const el = document.querySelector('#batch_script_input textarea') || document.querySelector('.batch-box textarea');
+            const val = el ? el.value : '';
+            const start = (el && typeof el.selectionStart === 'number') ? el.selectionStart : val.length;
+            const end = (el && typeof el.selectionEnd === 'number') ? el.selectionEnd : val.length;
+            const matches = val.match(/\\[(?:#|Block:\\s*)?[^\\]]+\\]/gi) || [];
+            const nextIdx = matches.length + 1;
+            let prefix = '';
+            if (start > 0) {
+                if (val.slice(0, start).endsWith('\\n\\n')) {
+                    prefix = '';
+                } else if (val.slice(0, start).endsWith('\\n')) {
+                    prefix = '\\n';
+                } else {
+                    prefix = '\\n\\n';
+                }
+            }
+            const tag = `[#Đoạn ${nextIdx}] `;
+            const suffix = (end < val.length && !val.slice(end).startsWith('\\n')) ? '\\n' : '';
+            const inserted = prefix + tag;
+            const newVal = val.slice(0, start) + inserted + suffix + val.slice(end);
+            const newPos = start + inserted.length;
+            if (el) {
+                el.value = newVal;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                setTimeout(() => {
+                    el.focus();
+                    el.setSelectionRange(newPos, newPos);
+                }, 20);
+            }
+            return newVal;
+        }"""
 
-        btn_insert_block.click(_ins_block, inputs=[batch_script_input], outputs=[batch_script_input])
-        btn_insert_cuoi.click(lambda t: _ins_tag(t, "[cười]"), inputs=[batch_script_input], outputs=[batch_script_input])
-        btn_insert_thodai.click(lambda t: _ins_tag(t, "[thở dài]"), inputs=[batch_script_input], outputs=[batch_script_input])
-        btn_insert_hanggiong.click(lambda t: _ins_tag(t, "[hắng giọng]"), inputs=[batch_script_input], outputs=[batch_script_input])
+        js_insert_speaker = """() => {
+            const el = document.querySelector('#batch_script_input textarea') || document.querySelector('.batch-box textarea');
+            const val = el ? el.value : '';
+            const start = (el && typeof el.selectionStart === 'number') ? el.selectionStart : val.length;
+            const end = (el && typeof el.selectionEnd === 'number') ? el.selectionEnd : val.length;
+            const prefix = (start > 0 && !val.slice(0, start).endsWith('\\n')) ? '\\n' : '';
+            const tag = '(Nhân vật) ';
+            const inserted = prefix + tag;
+            const newVal = val.slice(0, start) + inserted + val.slice(end);
+            const newPos = start + inserted.length;
+            if (el) {
+                el.value = newVal;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                setTimeout(() => {
+                    el.focus();
+                    el.setSelectionRange(newPos, newPos);
+                }, 20);
+            }
+            return newVal;
+        }"""
 
-        btn_insert_speaker.click(lambda t: (t.rstrip() + "\n(Nhân vật) ").strip() + " ", inputs=[batch_script_input], outputs=[batch_script_input])
+        btn_insert_block.click(fn=None, js=js_insert_block, outputs=[batch_script_input])
+        btn_insert_cuoi.click(fn=None, js=_make_js_insert_tag("[cười]"), outputs=[batch_script_input])
+        btn_insert_thodai.click(fn=None, js=_make_js_insert_tag("[thở dài]"), outputs=[batch_script_input])
+        btn_insert_hanggiong.click(fn=None, js=_make_js_insert_tag("[hắng giọng]"), outputs=[batch_script_input])
+        btn_insert_speaker.click(fn=None, js=js_insert_speaker, outputs=[batch_script_input])
         btn_batch_detect_speakers.click(
             fn=extract_speakers_from_script,
             inputs=[batch_script_input],
